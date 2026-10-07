@@ -2,10 +2,14 @@
 <!--
   MyAffirmations — Google Doc picker (see .kiro/specs/google-docs/design.md).
   The app opens this page in a browser tab with a short-lived Drive access token in the URL
-  fragment (#token=…; fragments are never sent to a server). It shows Google Picker; the
-  picked Doc is granted to the app's Google Cloud project (setAppId) under the app's
-  `drive.file` permission, then the page hands the choice back to the app:
-    com.migeek.affirmations://picked?id=<fileId>&name=<name>   (or ?cancelled=1)
+  fragment (fragments are never sent to a server):
+    #token=<token>&mode=doc|folder&parent=<folderId to start in, default My Drive>
+  It shows Google Picker — mode=doc: browse folders and pick a Google Doc (import);
+  mode=folder: pick a folder (where to save an export). The pick is granted to the app's
+  Google Cloud project (setAppId) under the app's `drive.file` permission, then the page hands
+  it back to the app:
+    com.migeek.affirmations://picked?id=<id>&name=<name>&parent=<folder it is in>
+  (or ?cancelled=1)
   Published on GitHub Pages (the app repo is private). API_KEY is restricted to the Picker
   API and this page's origin, so it is not a secret.
 -->
@@ -28,7 +32,10 @@
     const APP_ID = '924160936244';
     const RETURN_TO = 'com.migeek.affirmations://picked';
 
-    const token = new URLSearchParams(location.hash.slice(1)).get('token');
+    const params = new URLSearchParams(location.hash.slice(1));
+    const token = params.get('token');
+    const mode = params.get('mode') === 'folder' ? 'folder' : 'doc';
+    const parent = params.get('parent') || 'root';
     // Don't leave the token in the address bar or history.
     history.replaceState(null, '', location.pathname);
 
@@ -50,20 +57,35 @@
         say('Open this page from the MyAffirmations app.');
         return;
       }
-      const docs = new google.picker.DocsView(google.picker.ViewId.DOCUMENTS)
-        .setMode(google.picker.DocsViewMode.LIST);
+      const FOLDER = 'application/vnd.google-apps.folder';
+      const view = mode === 'folder'
+        // Folders only; a folder can be selected (where to save).
+        ? new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+            .setMimeTypes(FOLDER)
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(true)
+            .setParent(parent)
+        // Google Docs, browsed folder by folder from [parent].
+        : new google.picker.DocsView(google.picker.ViewId.DOCS)
+            .setMimeTypes('application/vnd.google-apps.document')
+            .setIncludeFolders(true)
+            .setSelectFolderEnabled(false)
+            .setParent(parent);
+      view.setMode(google.picker.DocsViewMode.LIST);
       new google.picker.PickerBuilder()
-        .addView(docs)
+        .addView(view)
         .setOAuthToken(token)
         .setDeveloperKey(API_KEY)
         .setAppId(APP_ID)
-        .setTitle('Choose a Google Doc to import')
+        .setTitle(mode === 'folder' ? 'Choose a folder to save in'
+                                    : 'Choose a Google Doc to import')
         .setCallback((data) => {
           const action = data[google.picker.Response.ACTION];
           if (action === google.picker.Action.PICKED) {
             const doc = data[google.picker.Response.DOCUMENTS][0];
             returnToApp({ id: doc[google.picker.Document.ID],
-                          name: doc[google.picker.Document.NAME] },
+                          name: doc[google.picker.Document.NAME],
+                          parent: doc[google.picker.Document.PARENT_ID] || '' },
                         'Got it — returning to MyAffirmations…');
           } else if (action === google.picker.Action.CANCEL) {
             returnToApp({ cancelled: '1' }, 'Cancelled — returning to MyAffirmations…');
