@@ -3,9 +3,10 @@
   MyAffirmations — Google Doc picker (see .kiro/specs/google-docs/design.md).
   The app opens this page in a browser tab with a short-lived Drive access token in the URL
   fragment (fragments are never sent to a server):
-    #token=<token>&mode=doc|folder&parent=<folderId to start in, default My Drive>
-  It shows Google Picker — mode=doc: browse folders and pick a Google Doc (import);
-  mode=folder: pick a folder (where to save an export). The pick is granted to the app's
+    #token=<token>&mode=doc|folder[&parent=<folderId>&parentName=<name>]
+  It shows Google Picker — mode=doc: browse folders from My Drive (or Recently picked) and pick
+  a Google Doc (import); mode=folder: pick a folder to save an export in (tabs: the remembered
+  folder [parent], by name, and My Drive). The pick is granted to the app's
   Google Cloud project (setAppId) under the app's `drive.file` permission, then the page hands
   it back to the app:
     com.migeek.affirmations://picked?id=<id>&name=<name>&parent=<folder it is in>
@@ -36,6 +37,7 @@
     const token = params.get('token');
     const mode = params.get('mode') === 'folder' ? 'folder' : 'doc';
     const parent = params.get('parent') || 'root'; // remembered folder
+    const parentName = params.get('parentName') || 'Last folder';
     // Don't leave the token in the address bar or history.
     history.replaceState(null, '', location.pathname);
 
@@ -58,27 +60,33 @@
         return;
       }
       const FOLDER = 'application/vnd.google-apps.folder';
-      // One browsable view starting in folder [start]: folders only (one can
-      // be selected — where to save), or Google Docs browsed folder by folder.
-      function viewFrom(start, label) {
-        const view = mode === 'folder'
-          ? new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-              .setMimeTypes(FOLDER)
-              .setIncludeFolders(true)
-              .setSelectFolderEnabled(true)
-          : new google.picker.DocsView(google.picker.ViewId.DOCS)
-              .setMimeTypes('application/vnd.google-apps.document')
-              .setIncludeFolders(true)
-              .setSelectFolderEnabled(false);
-        view.setParent(start).setMode(google.picker.DocsViewMode.LIST);
+      const DOC = 'application/vnd.google-apps.document';
+      // Google's folder view (it shows where you are and moves through
+      // folders), starting in folder [start]. mode=folder: folders only, one
+      // can be selected (where to save). mode=doc: Google Docs inside the
+      // folders, a Doc can be picked.
+      function folderView(start, label) {
+        const view = new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+          .setMimeTypes(mode === 'folder' ? FOLDER : FOLDER + ',' + DOC)
+          .setIncludeFolders(true)
+          .setSelectFolderEnabled(mode === 'folder')
+          .setParent(start)
+          .setMode(google.picker.DocsViewMode.LIST);
         if (typeof view.setLabel === 'function') view.setLabel(label);
         return view;
       }
-      // A view started inside a folder can't go up out of it, so with a
-      // remembered folder there are two tabs: that folder, and My Drive.
       const builder = new google.picker.PickerBuilder();
-      if (parent !== 'root') builder.addView(viewFrom(parent, 'Last folder'));
-      builder.addView(viewFrom('root', 'My Drive'));
+      if (mode === 'folder') {
+        // A view started inside a folder can't go up out of it: a tab for the
+        // remembered folder (by name), and My Drive to go anywhere.
+        if (parent !== 'root') builder.addView(folderView(parent, parentName));
+        builder.addView(folderView('root', 'My Drive'));
+      } else {
+        builder.addView(folderView('root', 'My Drive'));
+        // Docs picked before (for this app), by name.
+        builder.addView(new google.picker.View(google.picker.ViewId.RECENTLY_PICKED)
+          .setMimeTypes(DOC));
+      }
       builder
         .setOAuthToken(token)
         .setDeveloperKey(API_KEY)
