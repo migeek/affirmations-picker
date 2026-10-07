@@ -35,7 +35,7 @@
     const params = new URLSearchParams(location.hash.slice(1));
     const token = params.get('token');
     const mode = params.get('mode') === 'folder' ? 'folder' : 'doc';
-    const parent = params.get('parent') || 'root';
+    const parent = params.get('parent') || 'root'; // remembered folder
     // Don't leave the token in the address bar or history.
     history.replaceState(null, '', location.pathname);
 
@@ -58,22 +58,28 @@
         return;
       }
       const FOLDER = 'application/vnd.google-apps.folder';
-      const view = mode === 'folder'
-        // Folders only; a folder can be selected (where to save).
-        ? new google.picker.DocsView(google.picker.ViewId.FOLDERS)
-            .setMimeTypes(FOLDER)
-            .setIncludeFolders(true)
-            .setSelectFolderEnabled(true)
-            .setParent(parent)
-        // Google Docs, browsed folder by folder from [parent].
-        : new google.picker.DocsView(google.picker.ViewId.DOCS)
-            .setMimeTypes('application/vnd.google-apps.document')
-            .setIncludeFolders(true)
-            .setSelectFolderEnabled(false)
-            .setParent(parent);
-      view.setMode(google.picker.DocsViewMode.LIST);
-      new google.picker.PickerBuilder()
-        .addView(view)
+      // One browsable view starting in folder [start]: folders only (one can
+      // be selected — where to save), or Google Docs browsed folder by folder.
+      function viewFrom(start, label) {
+        const view = mode === 'folder'
+          ? new google.picker.DocsView(google.picker.ViewId.FOLDERS)
+              .setMimeTypes(FOLDER)
+              .setIncludeFolders(true)
+              .setSelectFolderEnabled(true)
+          : new google.picker.DocsView(google.picker.ViewId.DOCS)
+              .setMimeTypes('application/vnd.google-apps.document')
+              .setIncludeFolders(true)
+              .setSelectFolderEnabled(false);
+        view.setParent(start).setMode(google.picker.DocsViewMode.LIST);
+        if (typeof view.setLabel === 'function') view.setLabel(label);
+        return view;
+      }
+      // A view started inside a folder can't go up out of it, so with a
+      // remembered folder there are two tabs: that folder, and My Drive.
+      const builder = new google.picker.PickerBuilder();
+      if (parent !== 'root') builder.addView(viewFrom(parent, 'Last folder'));
+      builder.addView(viewFrom('root', 'My Drive'));
+      builder
         .setOAuthToken(token)
         .setDeveloperKey(API_KEY)
         .setAppId(APP_ID)
