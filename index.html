@@ -1,0 +1,81 @@
+<!doctype html>
+<!--
+  MyAffirmations — Google Doc picker (see .kiro/specs/google-docs/design.md).
+  The app opens this page in a browser tab with a short-lived Drive access token in the URL
+  fragment (#token=…; fragments are never sent to a server). It shows Google Picker; the
+  picked Doc is granted to the app's Google Cloud project (setAppId) under the app's
+  `drive.file` permission, then the page hands the choice back to the app:
+    com.migeek.affirmations://picked?id=<fileId>&name=<name>   (or ?cancelled=1)
+  Published on GitHub Pages (the app repo is private). API_KEY is restricted to the Picker
+  API and this page's origin, so it is not a secret.
+-->
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Choose a Google Doc</title>
+  <style>
+    body { font-family: system-ui, sans-serif; margin: 24px; color: #1b1b1b; background: #fff; }
+    a.button { display: inline-block; margin-top: 16px; padding: 12px 20px; border-radius: 20px;
+               background: #1E6F66; color: #fff; text-decoration: none; }
+  </style>
+</head>
+<body>
+  <p id="msg">Opening Google Drive…</p>
+  <p><a id="back" class="button" hidden>Back to MyAffirmations</a></p>
+  <script>
+    const API_KEY = 'AIzaSyBOzo00C2el2WLw7l94K2FjILPGbtBnuLE';
+    const APP_ID = '924160936244';
+    const RETURN_TO = 'com.migeek.affirmations://picked';
+
+    const token = new URLSearchParams(location.hash.slice(1)).get('token');
+    // Don't leave the token in the address bar or history.
+    history.replaceState(null, '', location.pathname);
+
+    function say(text) { document.getElementById('msg').textContent = text; }
+
+    // Hand the result back to the app. A button too, in case the browser
+    // blocks the automatic jump to the app.
+    function returnToApp(query, text) {
+      const link = RETURN_TO + '?' + new URLSearchParams(query);
+      say(text);
+      const back = document.getElementById('back');
+      back.href = link;
+      back.hidden = false;
+      location.href = link;
+    }
+
+    function showPicker() {
+      if (!token) {
+        say('Open this page from the MyAffirmations app.');
+        return;
+      }
+      const docs = new google.picker.DocsView(google.picker.ViewId.DOCUMENTS)
+        .setMode(google.picker.DocsViewMode.LIST);
+      new google.picker.PickerBuilder()
+        .addView(docs)
+        .setOAuthToken(token)
+        .setDeveloperKey(API_KEY)
+        .setAppId(APP_ID)
+        .setTitle('Choose a Google Doc to import')
+        .setCallback((data) => {
+          const action = data[google.picker.Response.ACTION];
+          if (action === google.picker.Action.PICKED) {
+            const doc = data[google.picker.Response.DOCUMENTS][0];
+            returnToApp({ id: doc[google.picker.Document.ID],
+                          name: doc[google.picker.Document.NAME] },
+                        'Got it — returning to MyAffirmations…');
+          } else if (action === google.picker.Action.CANCEL) {
+            returnToApp({ cancelled: '1' }, 'Cancelled — returning to MyAffirmations…');
+          }
+        })
+        .build()
+        .setVisible(true);
+      say('');
+    }
+
+    function onApiLoad() { gapi.load('picker', showPicker); }
+  </script>
+  <script async defer src="https://apis.google.com/js/api.js" onload="onApiLoad()"></script>
+</body>
+</html>
